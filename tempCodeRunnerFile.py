@@ -1,3 +1,1 @@
-
-    "http://10.205.211.110:4747/video"
-)
+C:\1.ace\edge-detection\sobel1.pt

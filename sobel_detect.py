@@ -3,66 +3,187 @@ import cv2
 import numpy as np
 import time
 
-model = YOLO(r"C:\1.ace\edge-detection\best (2)_openvino_model")
+# ==========================
+# LOAD MODEL
+# ==========================
+model = YOLO(r"C:\1.ace\edge-detection\sobel1.pt")
+
+# ==========================
+# CAMERA
+# ==========================
 cap = cv2.VideoCapture("http://10.205.211.110:4747/video")
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 prev_time = time.time()
-target_size = (800, 600)  # Ukuran target untuk Sobel
 
 while True:
+
     ret, frame = cap.read()
+
     if not ret:
         print("Camera gagal dibuka")
         break
 
     frame = cv2.resize(frame, (640, 480))
-    results = model.predict(frame, imgsz=320, conf=0.6, verbose=False)
 
-    output = frame.copy()
+    # ==========================
+    # ORIGINAL
+    # ==========================
+    original = frame.copy()
+
+    # ==========================
+    # SOBEL (SAMA SEPERTI TRAINING)
+    # ==========================
+
+    gray = cv2.cvtColor(
+        frame,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    blur = cv2.GaussianBlur(
+        gray,
+        (9, 9),
+        0
+    )
+
+    sobelx = cv2.Sobel(
+        blur,
+        cv2.CV_64F,
+        1,
+        0,
+        ksize=3
+    )
+
+    sobely = cv2.Sobel(
+        blur,
+        cv2.CV_64F,
+        0,
+        1,
+        ksize=3
+    )
+
+    sobel = cv2.magnitude(
+        sobelx,
+        sobely
+    )
+
+    sobel = np.uint8(
+        np.clip(
+            sobel,
+            0,
+            255
+        )
+    )
+
+    # YOLO perlu 3 channel
+    sobel_bgr = cv2.cvtColor(
+        sobel,
+        cv2.COLOR_GRAY2BGR
+    )
+
+    # ==========================
+    # YOLO DETECT
+    # ==========================
+
+    results = model.predict(
+        source=sobel_bgr,
+        imgsz=320,
+        conf=0.6,
+        verbose=False
+    )
+
+    yolo_view = sobel_bgr.copy()
 
     for box in results[0].boxes:
-        x1, y1, x2, y2 = map(int, box.xyxy[0])
-        conf = float(box.conf[0])
 
-        cv2.rectangle(output, (x1, y1), (x2, y2), (0,255,0), 2)
-        cv2.putText(output, f"{conf:.2f}", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+        x1, y1, x2, y2 = map(
+            int,
+            box.xyxy[0]
+        )
 
-        roi = frame[y1:y2, x1:x2]
-        if roi.size == 0:
-            continue
+        conf = float(
+            box.conf[0]
+        )
 
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-        sobel = cv2.magnitude(sobelx, sobely)
-        sobel = np.uint8(np.clip(sobel, 0, 255))
-        
-        # Scale ke ukuran yang lebih besar
-        scale_x = target_size[0] / sobel.shape[1]
-        scale_y = target_size[1] / sobel.shape[0]
-        scale = min(scale_x, scale_y)
-        new_w = int(sobel.shape[1] * scale)
-        new_h = int(sobel.shape[0] * scale)
-        sobel_besar = cv2.resize(sobel, (new_w, new_h))
-        
-        # Tambah padding
-        padded = np.zeros((target_size[1], target_size[0]), dtype=np.uint8)
-        y_offset = (target_size[1] - new_h) // 2
-        x_offset = (target_size[0] - new_w) // 2
-        padded[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = sobel_besar
-        
-        cv2.imshow("Sobel ROI (Full Window)", padded)
-        break  # Tampilkan hanya ROI pertama
+        cls = int(
+            box.cls[0]
+        )
+
+        label = model.names[cls]
+
+        cv2.rectangle(
+            yolo_view,
+            (x1, y1),
+            (x2, y2),
+            (0, 255, 0),
+            2
+        )
+
+        cv2.putText(
+            yolo_view,
+            f"{label} {conf:.2f}",
+            (x1, y1 - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 0),
+            2
+        )
+
+    # ==========================
+    # FPS
+    # ==========================
 
     current_time = time.time()
-    fps = 1 / (current_time - prev_time)
+
+    fps = 1 / max(
+        current_time - prev_time,
+        0.0001
+    )
+
     prev_time = current_time
 
-    cv2.putText(output, f"FPS: {int(fps)}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
-    cv2.imshow("YOLO OpenVINO + Sobel", output)
+    cv2.putText(
+        original,
+        f"FPS: {int(fps)}",
+        (10, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 0, 255),
+        2
+    )
 
-    if cv2.waitKey(1) == 27:
+    cv2.putText(
+        yolo_view,
+        f"FPS: {int(fps)}",
+        (10, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 0, 255),
+        2
+    )
+
+    # ==========================
+    # DISPLAY
+    # ==========================
+
+    cv2.imshow(
+        "1 - Original Camera",
+        original
+    )
+
+    cv2.imshow(
+        "2 - Sobel",
+        sobel
+    )
+
+    cv2.imshow(
+        "3 - YOLO Detection",
+        yolo_view
+    )
+
+    key = cv2.waitKey(1)
+
+    if key == 27:
         break
 
 cap.release()
